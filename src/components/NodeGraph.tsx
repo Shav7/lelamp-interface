@@ -590,14 +590,14 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
             break;
           case "nodding":
             // Up and down motion (primarily joint 2)
-            value = jointIndex === 1 
+            value = jointIndex === 1
               ? Math.sin(t * Math.PI * 2) * (Math.PI / 4)
               : (Math.random() - 0.5) * 0.2;
             break;
           case "pointing":
             // Extend and point
-            value = jointIndex <= 2 
-              ? t * (Math.PI / 3) 
+            value = jointIndex <= 2
+              ? t * (Math.PI / 3)
               : (Math.random() - 0.5) * 0.3;
             break;
           case "exploring":
@@ -643,12 +643,12 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
       // Create transition node between poses (except for last)
       if (index < nodeCount - 1) {
         const transitionNodeId = `ai-chat-transition-${timestamp}`;
-        
+
         // Vary smoothness based on motion type
         let smoothness = 50;
         if (motionType === "dramatic") smoothness = 30;
         if (motionType === "smooth") smoothness = 70;
-        
+
         const transitionNode: Node<NodeData> = {
           id: transitionNodeId,
           type: "customNode",
