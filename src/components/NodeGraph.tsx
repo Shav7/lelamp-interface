@@ -194,10 +194,14 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
     nodes.forEach((node) => {
       const existingState = getNodeState(node.id);
       if (!existingState && (node.data as any)?.type === 'joint') {
-        const joints = availableJointsStore.map((name) => ({
-          name,
-          value: typeof storeJointValues[name] === 'number' ? storeJointValues[name] : 0,
-        }));
+        // Use existing joints from node data if available, otherwise seed from store
+        const existingJoints = (node.data as any)?.joints;
+        const joints = existingJoints && existingJoints.length > 0
+          ? existingJoints
+          : availableJointsStore.map((name) => ({
+            name,
+            value: typeof storeJointValues[name] === 'number' ? storeJointValues[name] : 0,
+          }));
         setNodeState(node.id, {
           id: node.id,
           type: 'joint',
