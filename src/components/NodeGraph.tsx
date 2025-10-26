@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -16,9 +16,14 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { NodeCard } from "./nodes/NodeCard";
 import { Button } from "@/components/ui/button";
-import { Plus, Play, Square, X } from "lucide-react";
+import { Plus, Play, Square, X, Download } from "lucide-react";
 import { useJointStore, type JointParameter, type TransitionOptions } from "@/store/useJointStore";
 import { toast } from "sonner";
+
+interface RecordedFrame {
+  timestamp: number;
+  jointPositions: Record<string, number>;
+}
 
 const nodeTypes = {
   customNode: (props: any) => <NodeCard {...props} id={props.id} />,
@@ -91,13 +96,15 @@ interface NodeGraphProps {
   jointValues?: Record<string, number>;
   onSelectJoint?: (jointName: string | null) => void;
   availableJoints?: string[];
+  initialCsvNodes?: Node[];
+  initialCsvEdges?: Edge[];
 }
 
 const initialNodes: Node<NodeData>[] = [];
 
 const initialEdges: Edge[] = [];
 
-export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJoint, availableJoints }: NodeGraphProps = {}) => {
+export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJoint, availableJoints, initialCsvNodes = [], initialCsvEdges = [] }: NodeGraphProps = {}) => {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
@@ -112,6 +119,12 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
   const setIsAnimating = useJointStore((s) => s.setIsAnimating);
   const setActiveNodeId = useJointStore((s) => s.setActiveNodeId);
   const [animationAbortController, setAnimationAbortController] = useState<AbortController | null>(null);
+
+  // Recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedFrames, setRecordedFrames] = useState<RecordedFrame[]>([]);
+  const recordingStartTime = useRef<number>(0);
+  const recordingIntervalRef = useRef<number | null>(null);
 
   // Delete node callback
   const handleDeleteNode = useCallback((nodeId: string) => {
@@ -135,6 +148,14 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
       }))
     );
   }, [onJointChange, handleDeleteNode, setNodes]);
+
+  // Load CSV nodes when they're provided
+  useEffect(() => {
+    if (initialCsvNodes.length > 0) {
+      setNodes(initialCsvNodes);
+      setEdges(initialCsvEdges);
+    }
+  }, [initialCsvNodes, initialCsvEdges, setNodes, setEdges]);
 
   // Only sync store values to focused node (for live feedback from 3D dragging)
   // Do NOT sync during animation
@@ -286,6 +307,78 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
     setNodes((nds) => [...nds, newNode]);
   }, [setNodes, onJointChange, availableJointsStore, storeJointValues, mousePosition]);
 
+  // Recording functions
+  const startRecording = useCallback(() => {
+    setIsRecording(true);
+    setRecordedFrames([]);
+    recordingStartTime.current = Date.now();
+
+    // Record at 50Hz (every 20ms)
+    recordingIntervalRef.current = window.setInterval(() => {
+      const timestamp = Date.now() - recordingStartTime.current;
+      setRecordedFrames(prev => [...prev, {
+        timestamp,
+        jointPositions: { ...storeJointValues }
+      }]);
+    }, 20);
+
+    toast.success('Started recording animation');
+  }, [storeJointValues]);
+
+  const stopRecording = useCallback(() => {
+    setIsRecording(false);
+    if (recordingIntervalRef.current) {
+      clearInterval(recordingIntervalRef.current);
+      recordingIntervalRef.current = null;
+    }
+    toast.success(`Stopped recording. Captured ${recordedFrames.length} frames`);
+  }, [recordedFrames.length]);
+
+  const exportToCSV = useCallback(() => {
+    if (recordedFrames.length === 0) {
+      toast.error('No recorded data to export');
+      return;
+    }
+
+    // For 5 DOF lamp, we expect joints: 1, 2, 3, 4, 5
+    const lampJoints = ['1', '2', '3', '4', '5'];
+
+    // Build CSV header: timestamp, joint1, joint2, joint3, joint4, joint5
+    const headers = ['timestamp', ...lampJoints.map(j => `joint${j}`)];
+    const csvRows = [headers.join(',')];
+
+    // Add data rows
+    for (const frame of recordedFrames) {
+      const row = [
+        frame.timestamp,
+        ...lampJoints.map(j => frame.jointPositions[j] ?? 0)
+      ];
+      csvRows.push(row.join(','));
+    }
+
+    const csvContent = csvRows.join('\n');
+
+    // Download the CSV file
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `lamp_animation_${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    toast.success(`Exported CSV with ${recordedFrames.length} frames`);
+  }, [recordedFrames]);
+
+  // Cleanup recording interval on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+    };
+  }, []);
+
   const runAnimation = useCallback(async () => {
     if (isAnimating) return;
 
@@ -297,6 +390,13 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
     if (startNodes.length === 0) {
       toast.error("No starting node found. Add a node without incoming connections.");
       return;
+    }
+
+    // Auto-start recording when animation starts
+    if (isRecording) {
+      // Reset recording
+      setRecordedFrames([]);
+      recordingStartTime.current = Date.now();
     }
 
     const abortController = new AbortController();
@@ -407,13 +507,17 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
       setActiveNodeId(null);
       setAnimationAbortController(null);
     }
-  }, [nodes, edges, isAnimating, getNodeState, setStoreJointValues, setIsAnimating, setActiveNodeId]);
+  }, [nodes, edges, isAnimating, isRecording, getNodeState, setStoreJointValues, setIsAnimating, setActiveNodeId]);
 
   const stopAnimation = useCallback(() => {
     if (animationAbortController) {
       animationAbortController.abort();
     }
-  }, [animationAbortController]);
+    // Stop recording when animation stops
+    if (isRecording) {
+      stopRecording();
+    }
+  }, [animationAbortController, isRecording, stopRecording]);
 
   return (
     <div className="flex-1 bg-background relative w-full h-full overflow-hidden">
@@ -439,8 +543,8 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
         </Button>
       </div>
 
-      {/* Animation Controls */}
-      <div className="absolute top-4 right-4 z-10">
+      {/* Animation & Recording Controls */}
+      <div className="absolute top-4 right-4 z-10 flex gap-2">
         {!isAnimating ? (
           <Button
             size="sm"
@@ -461,6 +565,38 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
             Stop
           </Button>
         )}
+
+        <div className="flex gap-2 border-l pl-2 ml-1">
+          <Button
+            size="sm"
+            variant={isRecording ? "destructive" : "outline"}
+            className="text-xs shadow-md"
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={isAnimating}
+          >
+            {isRecording ? (
+              <>
+                <Square className="w-3 h-3 mr-1 fill-current" />
+                Stop Rec
+              </>
+            ) : (
+              <>
+                <span className="w-2 h-2 rounded-full bg-red-500 mr-1.5" />
+                Record
+              </>
+            )}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-xs shadow-md"
+            onClick={exportToCSV}
+            disabled={recordedFrames.length === 0}
+          >
+            <Download className="w-3 h-3 mr-1" />
+            Export ({recordedFrames.length})
+          </Button>
+        </div>
       </div>
 
       <ReactFlow
