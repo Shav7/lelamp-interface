@@ -30,14 +30,20 @@ Located in the **Node Canvas** (top-left toolbar)
 1. Look for the **"AI Agent"** button in the top-left toolbar (next to Joint/Transition buttons)
 2. Click the button
 3. The system will:
-   - Try to fetch agents from Neocortex
-   - If no agents exist: Create a demo AI node with random joint values
-   - If agents exist: Create nodes for each agent
+   - Try to fetch agents from Neocortex (currently blocked by CORS)
+   - If no agents exist or API blocked: Create a demo AI workflow with 3 connected poses
+   - If agents exist: Create nodes for each agent with transitions
 
 ### What Happens
-- **Demo Mode**: If no agents in Neocortex, creates a node with randomized joint positions
-- **Agent Mode**: Creates a node for each Neocortex agent with zero positions
-- Nodes can be connected and animated just like regular Joint nodes
+- **Demo Mode**: If no agents in Neocortex (or CORS blocks the API), creates a complete demo workflow:
+  - 3 joint nodes with varied random poses
+  - 2 transition nodes between them
+  - All connected and ready to animate
+- **Agent Mode**: Creates a complete workflow from real agents:
+  - Joint node for each agent with varied poses
+  - Transition nodes automatically inserted between joints
+  - All nodes connected in a sequence (ready to animate!)
+- Nodes can be edited and animated just like regular nodes
 - All standard functionality works (dragging, connecting, animating, recording, exporting)
 
 ## API Endpoints Used
@@ -56,19 +62,25 @@ POST /v1/projects/{projectId}/query
 ## Expected Behavior
 
 ### Success Cases:
-1. **No agents found**: 
-   - Toast: "No agents found. Creating demo AI node..."
-   - Creates 1 AI-powered node with random pose
-   - Toast: "Created AI-powered demo node!"
+1. **No agents found (or CORS blocked)**: 
+   - Toast: "No agents found. Creating demo AI workflow..."
+   - Creates 3 AI-powered joint nodes with varied random poses
+   - Creates 2 transition nodes between them
+   - All connected and ready to animate
+   - Toast: "Created AI-powered demo workflow with 3 poses!"
 
 2. **Agents found**:
-   - Creates nodes for each agent
-   - Positions them horizontally (200px apart)
-   - Toast: "Added X Neocortex agent(s)!"
+   - Creates joint nodes for each agent with varied poses
+   - Creates transition nodes between them
+   - Connects them in a ready-to-animate sequence
+   - Positions them horizontally (400px apart)
+   - Toast: "Added X Neocortex agent(s) with transitions!"
 
 ### Error Cases:
-1. **API Error**: 
-   - Toast: "Failed to connect to Neocortex. Check console for details."
+1. **API Error / CORS Issue**: 
+   - Currently the Neocortex API blocks browser requests (CORS)
+   - Falls back to demo mode: creates 3 connected demo poses
+   - Toast: "No agents found. Creating demo AI workflow..."
    - Check browser console for detailed error
 
 2. **No Robot Loaded**:

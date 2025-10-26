@@ -317,14 +317,16 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
     // Record at 50Hz (every 20ms)
     recordingIntervalRef.current = window.setInterval(() => {
       const timestamp = Date.now() - recordingStartTime.current;
+      // Get fresh joint values from store each time (not from closure)
+      const currentJointValues = useJointStore.getState().jointValues;
       setRecordedFrames(prev => [...prev, {
         timestamp,
-        jointPositions: { ...storeJointValues }
+        jointPositions: { ...currentJointValues }
       }]);
     }, 20);
 
     toast.success('Started recording animation');
-  }, [storeJointValues]);
+  }, []);
 
   const stopRecording = useCallback(() => {
     setIsRecording(false);
@@ -387,44 +389,31 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
     setIsLoadingNeocortex(true);
     try {
       const agents = await neocortexAPI.getAgents();
-      
-      if (agents.length === 0) {
-        toast.info('No agents found. Creating demo AI node...');
-        
-        // Create a demo AI node
-        const timestamp = Date.now();
-        const seededJoints: JointParameter[] = (availableJointsStore || []).map((name) => ({
-          name,
-          value: Math.random() * Math.PI - Math.PI/2, // Random pose
-        }));
+      console.log('Neocortex agents received:', agents);
 
-        const newNode: Node<NodeData> = {
-          id: `ai-node-${timestamp}`,
-          type: "customNode",
-          position: mousePosition || { x: 300, y: 300 },
-          data: {
-            type: "joint",
-            joints: seededJoints,
-            onJointChange,
-          },
-        };
-        
-        setNodes((nds) => [...nds, newNode]);
-        toast.success('Created AI-powered demo node!');
-      } else {
-        // Create nodes from agents
-        agents.forEach((agent, index) => {
-          const timestamp = Date.now() + index;
+      if (agents.length === 0) {
+        toast.info('No agents found. Creating demo AI workflow...');
+
+        // Create multiple demo nodes with transitions (simulate 3 agents)
+        const demoAgentCount = 3;
+        const newNodes: Node<NodeData>[] = [];
+        const newEdges: Edge[] = [];
+        const baseTimestamp = Date.now();
+
+        for (let index = 0; index < demoAgentCount; index++) {
+          const timestamp = baseTimestamp + index * 2;
           const seededJoints: JointParameter[] = (availableJointsStore || []).map((name) => ({
             name,
-            value: 0,
+            value: (Math.random() - 0.5) * Math.PI + (index * 0.4), // Varied random poses
           }));
 
-          const newNode: Node<NodeData> = {
-            id: `neo-agent-${agent.id}-${timestamp}`,
+          // Create joint node
+          const jointNodeId = `ai-demo-${timestamp}`;
+          const jointNode: Node<NodeData> = {
+            id: jointNodeId,
             type: "customNode",
             position: {
-              x: (mousePosition?.x || 300) + (index * 200),
+              x: (mousePosition?.x || 300) + (index * 400),
               y: (mousePosition?.y || 300)
             },
             data: {
@@ -433,11 +422,132 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
               onJointChange,
             },
           };
-          
-          setNodes((nds) => [...nds, newNode]);
+          newNodes.push(jointNode);
+
+          // Create transition node between poses (except for last)
+          if (index < demoAgentCount - 1) {
+            const transitionNodeId = `ai-demo-transition-${timestamp}`;
+            const transitionNode: Node<NodeData> = {
+              id: transitionNodeId,
+              type: "customNode",
+              position: {
+                x: (mousePosition?.x || 300) + (index * 400) + 200,
+                y: (mousePosition?.y || 300)
+              },
+              data: {
+                type: "transition",
+                transition: {
+                  smooth: true,
+                  smoothness: 50,
+                },
+              },
+            };
+            newNodes.push(transitionNode);
+
+            // Connect joint -> transition
+            newEdges.push({
+              id: `edge-${jointNodeId}-to-${transitionNodeId}`,
+              source: jointNodeId,
+              target: transitionNodeId,
+              type: 'custom',
+            });
+
+            // Connect transition -> next joint
+            const nextJointNodeId = `ai-demo-${baseTimestamp + (index + 1) * 2}`;
+            newEdges.push({
+              id: `edge-${transitionNodeId}-to-${nextJointNodeId}`,
+              source: transitionNodeId,
+              target: nextJointNodeId,
+              type: 'custom',
+            });
+          }
+        }
+
+        setNodes((nds) => [...nds, ...newNodes]);
+        setEdges((eds) => [...eds, ...newEdges]);
+        toast.success('Created AI-powered demo workflow with 3 poses!');
+      } else {
+        // Create nodes from agents with transitions and connections
+        console.log('Creating nodes for', agents.length, 'agents');
+        const newNodes: Node<NodeData>[] = [];
+        const newEdges: Edge[] = [];
+        const nodeIds: string[] = [];
+        const baseTimestamp = Date.now();
+
+        // First pass: Create all nodes and store their IDs
+        agents.forEach((agent, index) => {
+          console.log('Processing agent', index, ':', agent);
+          const timestamp = baseTimestamp + index * 2;
+          const seededJoints: JointParameter[] = (availableJointsStore || []).map((name) => ({
+            name,
+            value: index * 0.3, // Vary poses slightly
+          }));
+
+          // Create joint node
+          const jointNodeId = `neo-agent-${agent.id}-${timestamp}`;
+          const jointNode: Node<NodeData> = {
+            id: jointNodeId,
+            type: "customNode",
+            position: {
+              x: (mousePosition?.x || 300) + (index * 400),
+              y: (mousePosition?.y || 300)
+            },
+            data: {
+              type: "joint",
+              joints: seededJoints,
+              onJointChange,
+            },
+          };
+          newNodes.push(jointNode);
+          nodeIds.push(jointNodeId);
+
+          // Create transition node between this and next agent (except for last)
+          if (index < agents.length - 1) {
+            const transitionNodeId = `neo-transition-${timestamp}`;
+            const transitionNode: Node<NodeData> = {
+              id: transitionNodeId,
+              type: "customNode",
+              position: {
+                x: (mousePosition?.x || 300) + (index * 400) + 200,
+                y: (mousePosition?.y || 300)
+              },
+              data: {
+                type: "transition",
+                transition: {
+                  smooth: true,
+                  smoothness: 50,
+                },
+              },
+            };
+            newNodes.push(transitionNode);
+
+            // Connect joint -> transition
+            newEdges.push({
+              id: `edge-${jointNodeId}-to-${transitionNodeId}`,
+              source: jointNodeId,
+              target: transitionNodeId,
+              type: 'custom',
+            });
+
+            // Connect transition -> next joint
+            const nextJointNodeId = `neo-agent-${agents[index + 1].id}-${baseTimestamp + (index + 1) * 2}`;
+            newEdges.push({
+              id: `edge-${transitionNodeId}-to-${nextJointNodeId}`,
+              source: transitionNodeId,
+              target: nextJointNodeId,
+              type: 'custom',
+            });
+          }
         });
-        
-        toast.success(`Added ${agents.length} Neocortex agent(s)!`);
+
+        console.log('Created', newNodes.length, 'nodes and', newEdges.length, 'edges');
+        console.log('New nodes:', newNodes);
+        console.log('New edges:', newEdges);
+
+        setNodes((nds) => [...nds, ...newNodes]);
+        setEdges((eds) => [...eds, ...newEdges]);
+
+        toast.success(`Added ${agents.length} Neocortex agent(s) with transitions!`);
       }
     } catch (error) {
       console.error('Neocortex error:', error);
@@ -445,7 +555,7 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
     } finally {
       setIsLoadingNeocortex(false);
     }
-  }, [availableJointsStore, mousePosition, onJointChange, setNodes]);
+  }, [availableJointsStore, mousePosition, onJointChange, setNodes, setEdges]);
 
   const runAnimation = useCallback(async () => {
     if (isAnimating) return;
