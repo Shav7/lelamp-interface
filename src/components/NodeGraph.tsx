@@ -20,6 +20,7 @@ import { Plus, Play, Square, X, Download, Sparkles } from "lucide-react";
 import { useJointStore, type JointParameter, type TransitionOptions } from "@/store/useJointStore";
 import { toast } from "sonner";
 import { neocortexAPI } from "@/lib/neocortex";
+import { AIChatDialog } from "./AIChatDialog";
 
 interface RecordedFrame {
   timestamp: number;
@@ -388,6 +389,7 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
 
   // Neocortex AI Integration
   const [isLoadingNeocortex, setIsLoadingNeocortex] = useState(false);
+  const [showAIChat, setShowAIChat] = useState(false);
 
   const fetchNeocortexAgents = useCallback(async () => {
     setIsLoadingNeocortex(true);
@@ -561,6 +563,134 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
     }
   }, [availableJointsStore, mousePosition, onJointChange, setNodes, setEdges]);
 
+  // Generate nodes from AI chat command
+  const generateNodesFromChat = useCallback((prompt: string, response: { nodeCount?: number; motionType?: string }) => {
+    if (!availableJointsStore || availableJointsStore.length === 0) {
+      toast.error("Please upload a URDF file first");
+      return;
+    }
+
+    const nodeCount = response.nodeCount || 3;
+    const motionType = response.motionType || "smooth";
+    const newNodes: Node<NodeData>[] = [];
+    const newEdges: Edge[] = [];
+    const baseTimestamp = Date.now();
+
+    // Generate joint values based on motion type
+    const generateJointValues = (index: number, total: number): JointParameter[] => {
+      const t = index / (total - 1 || 1); // Normalized position 0 to 1
+
+      return (availableJointsStore || []).map((name, jointIndex) => {
+        let value = 0;
+
+        switch (motionType) {
+          case "waving":
+            // Sinusoidal wave motion
+            value = Math.sin(t * Math.PI * 2) * (Math.PI / 3) + (jointIndex === 4 ? Math.PI / 4 : 0);
+            break;
+          case "nodding":
+            // Up and down motion (primarily joint 2)
+            value = jointIndex === 1 
+              ? Math.sin(t * Math.PI * 2) * (Math.PI / 4)
+              : (Math.random() - 0.5) * 0.2;
+            break;
+          case "pointing":
+            // Extend and point
+            value = jointIndex <= 2 
+              ? t * (Math.PI / 3) 
+              : (Math.random() - 0.5) * 0.3;
+            break;
+          case "exploring":
+          case "random":
+            // Random exploration
+            value = (Math.random() - 0.5) * Math.PI * 0.8;
+            break;
+          case "dramatic":
+            // Large, dramatic movements
+            value = Math.sin(t * Math.PI + jointIndex) * (Math.PI / 2);
+            break;
+          default:
+            // Smooth interpolation
+            value = (Math.sin(t * Math.PI - Math.PI / 2) + 1) * 0.5 * (Math.PI / 4) + (jointIndex * 0.1);
+        }
+
+        return { name, value };
+      });
+    };
+
+    // Create nodes
+    for (let index = 0; index < nodeCount; index++) {
+      const timestamp = baseTimestamp + index * 2;
+      const seededJoints = generateJointValues(index, nodeCount);
+
+      // Create joint node
+      const jointNodeId = `ai-chat-${timestamp}`;
+      const jointNode: Node<NodeData> = {
+        id: jointNodeId,
+        type: "customNode",
+        position: {
+          x: (mousePosition?.x || 300) + (index * 400),
+          y: (mousePosition?.y || 300)
+        },
+        data: {
+          type: "joint",
+          joints: seededJoints,
+          onJointChange,
+        },
+      };
+      newNodes.push(jointNode);
+
+      // Create transition node between poses (except for last)
+      if (index < nodeCount - 1) {
+        const transitionNodeId = `ai-chat-transition-${timestamp}`;
+        
+        // Vary smoothness based on motion type
+        let smoothness = 50;
+        if (motionType === "dramatic") smoothness = 30;
+        if (motionType === "smooth") smoothness = 70;
+        
+        const transitionNode: Node<NodeData> = {
+          id: transitionNodeId,
+          type: "customNode",
+          position: {
+            x: (mousePosition?.x || 300) + (index * 400) + 200,
+            y: (mousePosition?.y || 300)
+          },
+          data: {
+            type: "transition",
+            transition: {
+              smooth: true,
+              smoothness,
+            },
+          },
+        };
+        newNodes.push(transitionNode);
+
+        // Connect joint -> transition
+        newEdges.push({
+          id: `edge-${jointNodeId}-to-${transitionNodeId}`,
+          source: jointNodeId,
+          target: transitionNodeId,
+          type: 'custom',
+        });
+
+        // Connect transition -> next joint
+        const nextJointNodeId = `ai-chat-${baseTimestamp + (index + 1) * 2}`;
+        newEdges.push({
+          id: `edge-${transitionNodeId}-to-${nextJointNodeId}`,
+          source: transitionNodeId,
+          target: nextJointNodeId,
+          type: 'custom',
+        });
+      }
+    }
+
+    setNodes((nds) => [...nds, ...newNodes]);
+    setEdges((eds) => [...eds, ...newEdges]);
+    toast.success(`Created ${nodeCount} nodes with ${motionType} motion!`);
+    setShowAIChat(false);
+  }, [availableJointsStore, mousePosition, onJointChange, setNodes, setEdges]);
+
   const runAnimation = useCallback(async () => {
     if (isAnimating) return;
 
@@ -727,11 +857,11 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
           size="sm"
           variant="outline"
           className="text-xs bg-card shadow-md border-purple-500/50 hover:bg-purple-500/10"
-          onClick={fetchNeocortexAgents}
-          disabled={isLoadingNeocortex || !availableJointsStore || availableJointsStore.length === 0}
+          onClick={() => setShowAIChat(true)}
+          disabled={!availableJointsStore || availableJointsStore.length === 0}
         >
           <Sparkles className="w-3 h-3 mr-1" />
-          {isLoadingNeocortex ? 'Loading...' : 'AI Agent'}
+          AI Agent
         </Button>
       </div>
 
@@ -841,6 +971,13 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
           maskColor="rgba(0, 0, 0, 0.05)"
         />
       </ReactFlow>
+
+      {/* AI Chat Dialog */}
+      <AIChatDialog
+        open={showAIChat}
+        onOpenChange={setShowAIChat}
+        onGenerateNodes={generateNodesFromChat}
+      />
     </div>
   );
 };
