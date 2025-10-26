@@ -16,9 +16,10 @@ import ReactFlow, {
 import "reactflow/dist/style.css";
 import { NodeCard } from "./nodes/NodeCard";
 import { Button } from "@/components/ui/button";
-import { Plus, Play, Square, X, Download } from "lucide-react";
+import { Plus, Play, Square, X, Download, Sparkles } from "lucide-react";
 import { useJointStore, type JointParameter, type TransitionOptions } from "@/store/useJointStore";
 import { toast } from "sonner";
+import { neocortexAPI } from "@/lib/neocortex";
 
 interface RecordedFrame {
   timestamp: number;
@@ -379,6 +380,73 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
     };
   }, []);
 
+  // Neocortex AI Integration
+  const [isLoadingNeocortex, setIsLoadingNeocortex] = useState(false);
+
+  const fetchNeocortexAgents = useCallback(async () => {
+    setIsLoadingNeocortex(true);
+    try {
+      const agents = await neocortexAPI.getAgents();
+      
+      if (agents.length === 0) {
+        toast.info('No agents found. Creating demo AI node...');
+        
+        // Create a demo AI node
+        const timestamp = Date.now();
+        const seededJoints: JointParameter[] = (availableJointsStore || []).map((name) => ({
+          name,
+          value: Math.random() * Math.PI - Math.PI/2, // Random pose
+        }));
+
+        const newNode: Node<NodeData> = {
+          id: `ai-node-${timestamp}`,
+          type: "customNode",
+          position: mousePosition || { x: 300, y: 300 },
+          data: {
+            type: "joint",
+            joints: seededJoints,
+            onJointChange,
+          },
+        };
+        
+        setNodes((nds) => [...nds, newNode]);
+        toast.success('Created AI-powered demo node!');
+      } else {
+        // Create nodes from agents
+        agents.forEach((agent, index) => {
+          const timestamp = Date.now() + index;
+          const seededJoints: JointParameter[] = (availableJointsStore || []).map((name) => ({
+            name,
+            value: 0,
+          }));
+
+          const newNode: Node<NodeData> = {
+            id: `neo-agent-${agent.id}-${timestamp}`,
+            type: "customNode",
+            position: {
+              x: (mousePosition?.x || 300) + (index * 200),
+              y: (mousePosition?.y || 300)
+            },
+            data: {
+              type: "joint",
+              joints: seededJoints,
+              onJointChange,
+            },
+          };
+          
+          setNodes((nds) => [...nds, newNode]);
+        });
+        
+        toast.success(`Added ${agents.length} Neocortex agent(s)!`);
+      }
+    } catch (error) {
+      console.error('Neocortex error:', error);
+      toast.error('Failed to connect to Neocortex. Check console for details.');
+    } finally {
+      setIsLoadingNeocortex(false);
+    }
+  }, [availableJointsStore, mousePosition, onJointChange, setNodes]);
+
   const runAnimation = useCallback(async () => {
     if (isAnimating) return;
 
@@ -540,6 +608,16 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
         >
           <Plus className="w-3 h-3 mr-1" />
           Transition
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="text-xs bg-card shadow-md border-purple-500/50 hover:bg-purple-500/10"
+          onClick={fetchNeocortexAgents}
+          disabled={isLoadingNeocortex || !availableJointsStore || availableJointsStore.length === 0}
+        >
+          <Sparkles className="w-3 h-3 mr-1" />
+          {isLoadingNeocortex ? 'Loading...' : 'AI Agent'}
         </Button>
       </div>
 
